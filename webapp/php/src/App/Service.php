@@ -513,8 +513,13 @@ class Service
         );
     }
 
+    /*
+     * 自分の取引一覧を表示する
+     * これが重い
+     */
     public function transactions(Request $request, Response $response, array $args)
     {
+//        ログインしているuserを呼んで来ている
         try {
             $user = $this->getCurrentUser();
         } catch (\DomainException $e) {
@@ -524,14 +529,18 @@ class Service
             return $response->withStatus(StatusCode::HTTP_INTERNAL_SERVER_ERROR)->withJson(['error' => 'db error']);
         }
 
+//        request何が入ってるかわからん
         $itemId = (int) $request->getParam('item_id', 0);
         $createdAt = (int) $request->getParam('created_at', 0);
 
         try {
+            // トランザクション貼ってる
             $this->dbh->beginTransaction();
 
+            // GET /users/transactions.json?created_at=1565617492&item_id=42282 HTTP/1.1 みたいな時呼ばれてる気がする
             if ($itemId !== 0 && $createdAt > 0) {
                 // paging
+                // アイテム（椅子）情報とってきてる
                 $sth = $this->dbh->prepare('SELECT * FROM `items` WHERE '.
                     '(`seller_id` = ? OR `buyer_id` = ?) AND `status` IN (?,?,?,?,?) AND (`created_at` < ? OR (`created_at` <=? AND `id` < ?)) '.
                     'ORDER BY `created_at` DESC, `id` DESC LIMIT ?');
@@ -551,7 +560,11 @@ class Service
                 if ($r === false) {
                     throw new \PDOException($sth->errorInfo());
                 }
+            // GET /users/transactions.json HTTP/1.1 の時↓が呼ばれる気がする
+
             } else {
+//                itemIdがないとかcreatedAtがないとか
+//                一覧表示すんの？
                 // 1st page
                 $sth = $this->dbh->prepare('SELECT * FROM `items` WHERE ' .
                     '(`seller_id` = ? OR `buyer_id` = ?) AND `status` IN (?,?,?,?,?) ' .
@@ -572,18 +585,22 @@ class Service
             }
             $items = $sth->fetchAll(PDO::FETCH_ASSOC);
             $itemDetails = [];
+//            item情報をとってくる
             foreach ($items as $item) {
+//                売り手の情報取ってくるよ
                 $seller = $this->getUserSimpleByID($item['seller_id']);
                 if ($seller === false) {
                     $this->dbh->rollBack();
                     return $response->withStatus(StatusCode::HTTP_NOT_FOUND)->withJson(['error' => 'seller not found']);
                 }
 
+//                カテゴリ情報とってくるよ
                 $category = $this->getCategoryByID($item['category_id']);
                 if ($category === false) {
                     $this->dbh->rollBack();
                     return $response->withStatus(StatusCode::HTTP_NOT_FOUND)->withJson(['error' => 'seller not found']);
                 }
+//                $detaiに必要な情報入ってる
                 $detail = [
                         'id' => (int) $item['id'],
                         'seller_id' => (int) $item['seller_id'],
@@ -598,16 +615,19 @@ class Service
                         'created_at' => (new \DateTime($item['created_at']))->getTimestamp(),
                     ];
 
+//                売り手があれば売り手の情報もとってくるよ
                 if ((int) $item['buyer_id'] !== 0) {
                     $buyer = $this->getUserSimpleByID($item['buyer_id']);
                     if ($buyer === false) {
                         $this->dbh->rollBack();
                         return $response->withStatus(StatusCode::HTTP_NOT_FOUND)->withJson(['error' => 'buyer not found']);
                     }
+//                    $detailに売り手の情報も追加
                     $detail['buyer_id'] = (int) $item['buyer_id'];
                     $detail['buyer'] = $buyer;
                 }
 
+//                取引証拠テーブルのデータをとってきてる
                 $sth = $this->dbh->prepare('SELECT * FROM `transaction_evidences` WHERE `item_id` = ?');
                 $r = $sth->execute([$item['id']]);
                 if ($r === false) {
@@ -615,8 +635,11 @@ class Service
                 }
 
                 $transactionEvidence = $sth->fetch(PDO::FETCH_ASSOC);
+//                取引証拠があれば
                 if ($transactionEvidence !== false) {
+//                    idあれば
                     if ($transactionEvidence['id'] > 0) {
+//                        運送情報テーブル
                         $sth = $this->dbh->prepare('SELECT * FROM `shippings` WHERE `transaction_evidence_id` = ?');
                         $r = $sth->execute([$transactionEvidence['id']]);
                         if ($r === false) {
@@ -629,6 +652,7 @@ class Service
                         }
 
                         $client = new Client();
+//                        この先でconfigテーブルみたりしてるわ
                         $host = $this->getShipmentServiceURL();
                         try {
                             $r = $client->get($host . '/status', [
@@ -649,12 +673,14 @@ class Service
                         }
                         $shippingResponse = json_decode($r->getBody());
 
+                        // $detailに取引証拠や運送についても追加してる
                         $detail['transaction_evidence_id'] = $transactionEvidence['id'];
                         $detail['transaction_evidence_status'] = $transactionEvidence['status'];
                         $detail['shipping_status'] = $shippingResponse->status;
                     }
                 }
 
+                // $detailはしたに引き継がれる
                 $itemDetails[] = $detail;
             }
 
