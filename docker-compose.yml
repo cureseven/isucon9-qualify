@@ -1,0 +1,40 @@
+version: "3"
+services:
+  web:
+    build: ./webapp/web
+    ports:
+      - 80:80
+  go:
+    image: busybox
+    command: /var/www/html/go/isucari
+    ports:
+      - 8000
+    volumes:
+      - ./webapp:/var/www/html
+    working_dir: /var/www/html/go
+    environment:
+      MYSQL_HOST: db
+      MYSQL_PORT: 3306
+      MYSQL_USER: isucari
+      MYSQL_DBNAME: isucari
+      MYSQL_PASS: isucari
+  # webapp/go/isucari
+  db:
+    image: mysql:5.7
+    environment: # 環境変数定義します
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: isucari
+      MYSQL_DBNAME: isucari
+      MYSQL_USER: isucari
+      MYSQL_PASSWORD: isucari
+      MYSQL_PASS: isucari
+      TZ: 'Asia/Tokyo'
+    command: mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci # defalutはmysqld
+    volumes:
+      - ./webapp/db:/var/lib/mysql # データの実態がある
+      - ./webapp/sql/00_create_database.sql:/docker-entrypoint-initdb.d/00_create_database.sql
+      - ./webapp/sql/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./webapp/sql/02_categories.sql:/docker-entrypoint-initdb.d/02_categories.sql
+      - ./webapp/sql/03_users.sql:/docker-entrypoint-initdb.d/03_users.sql
+    ports:
+      - 3306:3306

@@ -9,3 +9,4 @@ go.mod
 go.sum
 initial-data/*
 provisioning/*
+webapp/db
